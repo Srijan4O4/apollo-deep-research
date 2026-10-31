@@ -1,6 +1,6 @@
 # 🚀 Apollo: Deep Research Meta-Agent
 
-[![CI](https://github.com/your-org/apollo/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/apollo/actions)
+[![CI](https://github.com/Srijan4O4/apollo-deep-research/actions/workflows/ci.yml/badge.svg)](https://github.com/Srijan4O4/apollo-deep-research/actions)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![LangGraph](https://img.shields.io/badge/orchestration-LangGraph%20v0.4+-orange.svg)](https://github.com/langchain-ai/langgraph)
 [![FastAPI](https://img.shields.io/badge/backend-FastAPI-teal.svg)](https://fastapi.tiangolo.com)
@@ -12,37 +12,39 @@
 
 ## 🏛️ Architecture & Agent Topology
 
-The system implements a **Supervisor State Machine** pattern:
+The system implements a **Supervisor State Machine** pattern with an integrated pre-publication QA guardrail:
 
 ```mermaid
 flowchart TD
     User([User Request]) --> ApolloPlan["Apollo (Supervisor): Plan Outline"]
     ApolloPlan --> AthenaSearch["Athena (Search Sub-Agent): Multi-Source Retrieval"]
-    AthenaSearch --> HermesAnalyze["Hermes (Analyzer Sub-Agent): Gap & Quality Check"]
+    AthenaSearch --> HermesAnalyze["Hermes (Analyzer Sub-Agent): Gap & Benchmark Check"]
     
     HermesAnalyze --> CheckDecision{Gaps Found & iter < max?}
     CheckDecision -- "Yes (Iterative Refinement)" --> AthenaSearch
-    CheckDecision -- "No (Coverage >= 0.75)" --> ApolloSynthesize["Apollo: Synthesize Section with Citations"]
+    CheckDecision -- "No (Coverage >= 0.75)" --> ApolloSynthesize["Apollo: Synthesize Section with Citations & Tables"]
     
     ApolloSynthesize --> NextSectionCheck{More Sections?}
     NextSectionCheck -- "Yes" --> AthenaSearch
     NextSectionCheck -- "No" --> ApolloAssemble["Apollo: Assemble Final Report & Bibliography"]
-    ApolloAssemble --> FinalReport([Cited Final Report])
+    ApolloAssemble --> ApolloQA["Apollo QA: Audit Citations & Benchmark Parity"]
+    ApolloQA --> FinalReport([Publication-Ready Research Report])
 ```
 
 ### Agent Roles
 
 1. **Apollo (Meta-Agent / Supervisor)**
    - **Query Decomposition**: Deconstructs user query into a structured multi-section itinerary (`SectionOutline`).
-   - **Section Synthesis (Stage 1)**: Generates detailed section-specific content with strict inline source attribution (`[1]`, `[2]`).
-   - **Report Assembly (Stage 2)**: Synthesizes executive summary, consolidates cross-references, and compiles a unified, deduplicated bibliography.
+   - **Section Synthesis (Stage 1)**: Generates detailed section-specific content with strict inline source attribution (`[1]`, `[2]`) and quantitative benchmark comparison tables.
+   - **Report Assembly (Stage 2)**: Synthesizes executive summary, formal research methodology, consolidates cross-references, and compiles a unified, deduplicated bibliography.
+   - **Apollo QA Guardrail**: Performs pre-publication verification, fixing scale typos, checking citation completeness, and ensuring zero section duplication.
 
 2. **Athena (Search Engine Sub-Agent)**
-   - **Multi-Source Retrieval**: Queries live web (Tavily), scholarly literature (Semantic Scholar), and financial filings (SEC EDGAR).
-   - **Data Normalization**: Cleans, deduplicates, and calculates initial relevance scores for all evidence pieces.
+   - **Multi-Source Retrieval**: Queries direct arXiv API, Semantic Scholar, live web (Tavily), and financial filings (SEC EDGAR).
+   - **Data Normalization**: Cleans, deduplicates, and extracts author names, publication years, arXiv IDs, and source URLs.
 
 3. **Hermes (Analyzer Sub-Agent)**
-   - **Reflexion Loop**: Audits retrieved evidence against outline key questions.
+   - **Reflexion Loop**: Audits retrieved evidence against outline key questions, verifying whether quantitative benchmark numbers are present.
    - **Gap Detection**: Computes a quantitative coverage score (0.0 to 1.0). If gaps exist, generates targeted follow-up queries for Athena.
 
 ---
@@ -50,7 +52,6 @@ flowchart TD
 ## 📁 Repository Structure
 
 ```
-D:\apollo\
 ├── src/
 │   ├── main.py                    # FastAPI application entrypoint
 │   ├── config.py                  # Pydantic-settings configuration
@@ -60,13 +61,15 @@ D:\apollo\
 │   │   └── responses.py           # API response models & enums
 │   ├── agents/                    # LangGraph node implementations
 │   │   ├── apollo.py              # Supervisor planning, synthesis, assembly
+│   │   ├── apollo_qa.py           # Pre-publication QA guardrail node
 │   │   ├── athena.py              # Search agent with ReAct tool execution
 │   │   ├── hermes.py              # Analyzer agent for gap detection
 │   │   └── graph.py               # StateGraph compilation & conditional edges
 │   ├── tools/                     # Strictly typed search tool integrations
 │   │   ├── base.py                # Exponential backoff, ToolError, SearchResult
+│   │   ├── arxiv_search.py        # Direct arXiv Atom API client
 │   │   ├── web_search.py          # Tavily Search API
-│   │   ├── academic_search.py     # Semantic Scholar API
+│   │   ├── academic_search.py     # Semantic Scholar API with arXiv fallback
 │   │   └── financial_search.py    # SEC EDGAR full-text search
 │   ├── prompts/                   # Structured agent prompts (Chain-of-Thought / Reflexion)
 │   ├── services/                  # Business logic services
@@ -122,7 +125,7 @@ docker-compose up --build
 pip install -e ".[dev]"
 
 # Start backend server
-python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn src.main:app --host 0.0.0.0 --port 8000
 
 # Start Streamlit UI in a separate terminal
 streamlit run frontend/app.py --server.port 8501
@@ -138,7 +141,7 @@ Execute the comprehensive test suite:
 pytest -v
 ```
 
-All 33 test cases cover model validation, LangGraph state machine routing, citation management, report generation, and mocked agent executions.
+All **39 test cases** cover model validation, direct arXiv XML parsing, LangGraph state machine routing, citation management, report generation, and QA guardrails.
 
 ---
 
@@ -148,4 +151,5 @@ All 33 test cases cover model validation, LangGraph state machine routing, citat
 - **Stagnation Detection**: Terminates searching early if coverage score delta < 0.05 across consecutive cycles.
 - **Token Budget Protection**: Hard stop triggered if LLM token consumption reaches the configured threshold.
 - **Provider Fallback**: Seamless switch from Gemini Flash to OpenAI GPT-4o upon transient API rate limits or outages.
+- **Pre-Publication QA Guardrail**: Audits citations, normalizes parameter scale typos, and validates quantitative benchmark table presence before report release.
 - **Type Safety**: Strictly enforced Pydantic v2 schemas across all tool inputs, agent outputs, and API payloads.

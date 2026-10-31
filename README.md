@@ -1,10 +1,12 @@
 # 🚀 Apollo: Deep Research Meta-Agent
 
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://apollo-deep-research.streamlit.app/)
 [![CI](https://github.com/Srijan4O4/apollo-deep-research/actions/workflows/ci.yml/badge.svg)](https://github.com/Srijan4O4/apollo-deep-research/actions)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![LangGraph](https://img.shields.io/badge/orchestration-LangGraph%20v0.4+-orange.svg)](https://github.com/langchain-ai/langgraph)
 [![FastAPI](https://img.shields.io/badge/backend-FastAPI-teal.svg)](https://fastapi.tiangolo.com)
-[![Streamlit](https://img.shields.io/badge/frontend-Streamlit-red.svg)](https://streamlit.io)
+
+> 🌐 **Live Web Application**: **[https://apollo-deep-research.streamlit.app/](https://apollo-deep-research.streamlit.app/)**
 
 **Apollo** is a production-grade multi-agent research orchestrator designed to solve complex, multi-faceted research tasks. It coordinates specialized autonomous sub-agents within a deterministic **LangGraph finite state machine** to gather, verify, analyze, and synthesize structured, citation-backed research reports.
 
@@ -93,7 +95,11 @@ flowchart TD
 
 ## ⚡ Quick Start
 
-### 1. Environment Setup
+### 1. Live Cloud Web App (No Local Setup Required)
+Access the live deployment directly in your browser:
+👉 **[https://apollo-deep-research.streamlit.app/](https://apollo-deep-research.streamlit.app/)**
+
+### 2. Local Environment Setup
 
 Copy `.env.example` to `.env` and fill in your API credentials:
 

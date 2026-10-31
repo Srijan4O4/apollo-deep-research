@@ -39,20 +39,27 @@ def render_sidebar() -> dict[str, Any]:
         st.divider()
 
         st.subheader("API Keys")
+        gemini_default = getattr(st, "secrets", {}).get("GEMINI_API_KEY", "")
+        tavily_default = getattr(st, "secrets", {}).get("TAVILY_API_KEY", "")
+        openai_default = getattr(st, "secrets", {}).get("OPENAI_API_KEY", "")
+
         gemini_key = st.text_input(
             "Gemini API Key",
+            value=gemini_default,
             type="password",
             help="Required for primary LLM access",
             key="gemini_key",
         )
         openai_key = st.text_input(
             "OpenAI API Key (Optional)",
+            value=openai_default,
             type="password",
             help="Used as fallback LLM",
             key="openai_key",
         )
         tavily_key = st.text_input(
             "Tavily API Key",
+            value=tavily_default,
             type="password",
             help="Required for web search",
             key="tavily_key",
@@ -385,6 +392,104 @@ def _format_report_markdown(report_data: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def run_in_process_research(query: str, settings: dict[str, Any]) -> dict[str, Any] | None:
+    """Execute research graph directly in-process for standalone Streamlit Cloud deployments."""
+    import asyncio
+    import os
+    import sys
+    from pathlib import Path
+
+    # Ensure project root is in sys.path
+    root_dir = Path(__file__).resolve().parent.parent
+    if str(root_dir) not in sys.path:
+        sys.path.insert(0, str(root_dir))
+
+    # Apply API keys from sidebar or st.secrets
+    gemini_key = settings.get("gemini_key") or getattr(st, "secrets", {}).get("GEMINI_API_KEY", "")
+    tavily_key = settings.get("tavily_key") or getattr(st, "secrets", {}).get("TAVILY_API_KEY", "")
+    openai_key = settings.get("openai_key") or getattr(st, "secrets", {}).get("OPENAI_API_KEY", "")
+
+    if gemini_key:
+        os.environ["GEMINI_API_KEY"] = gemini_key
+    if tavily_key:
+        os.environ["TAVILY_API_KEY"] = tavily_key
+    if openai_key:
+        os.environ["OPENAI_API_KEY"] = openai_key
+
+    if not os.environ.get("GEMINI_API_KEY"):
+        st.error("❌ Gemini API Key is required. Please enter it in the sidebar or app secrets.")
+        return None
+
+    from src.agents.graph import build_research_graph
+    from src.services.citation_manager import CitationManager
+    from src.services.report_generator import ReportGenerator
+
+    progress_bar = st.progress(0, text="Initializing research in standalone mode...")
+    status_container = st.status("🔬 Autonomous Research in Progress...", expanded=True)
+    status_placeholder = status_container.empty()
+
+    async def _run():
+        initial_state = {
+            "query": query,
+            "outline": [],
+            "evidence": [],
+            "gap_reports": [],
+            "section_drafts": [],
+            "current_section_idx": 0,
+            "iteration_count": 0,
+            "max_iterations": settings.get("max_iterations", 3),
+            "status": "planning",
+            "messages": [],
+            "error_log": [],
+            "token_usage": 0,
+        }
+
+        graph = build_research_graph()
+        final_state = initial_state
+
+        async for chunk in graph.astream(initial_state, stream_mode="values"):
+            final_state = chunk
+            status = chunk.get("status", "planning")
+            outline = chunk.get("outline", [])
+            idx = chunk.get("current_section_idx", 0)
+            drafts = chunk.get("section_drafts", [])
+            evidence = chunk.get("evidence", [])
+
+            sec_title = outline[idx].title if outline and idx < len(outline) else "Planning Research Itinerary"
+            status_labels = {
+                "planning": "📋 Apollo: Planning structured research outline...",
+                "searching": "🔍 Athena: Discovering academic & web sources...",
+                "analyzing": "🔬 Hermes: Auditing coverage & empirical benchmarks...",
+                "synthesized": "✍️ Apollo: Synthesizing section drafts with citations...",
+                "complete": "🛡️ Apollo QA: Auditing pre-publication citations & tables...",
+            }
+            status_text = status_labels.get(status, f"Status: {status.upper()}")
+
+            status_placeholder.markdown(
+                f"### {status_text}\n\n"
+                f"- **Current Section:** `{sec_title}`\n"
+                f"- **Sections Synthesized:** `{len(drafts)} / {len(outline)}`\n"
+                f"- **Verified Sources Gathered:** `{len(evidence)}`"
+            )
+            if outline:
+                progress_bar.progress(min(len(drafts) / max(len(outline), 1), 1.0))
+
+        status_placeholder.markdown("### 📄 Generating Final Consolidated Report...")
+        citation_mgr = CitationManager()
+        generator = ReportGenerator(citation_mgr)
+        report = await generator.generate_report(final_state)
+        return report.model_dump(mode="json")
+
+    try:
+        report_data = asyncio.run(_run())
+        progress_bar.progress(1.0, text="✅ Research Complete!")
+        status_container.update(label="✅ Research Complete!", state="complete", expanded=False)
+        return report_data
+    except Exception as exc:
+        status_placeholder.error(f"❌ Standalone research execution failed: {exc}")
+        return None
+
+
 def main() -> None:
     """Main entry point for the Streamlit application."""
     configure_page()
@@ -396,10 +501,7 @@ def main() -> None:
 
     backend_healthy = check_backend_health()
     if not backend_healthy:
-        st.warning(
-            "⚠️ Backend API is not reachable at `http://localhost:8000`. "
-            "Please start the API server with: `python -m src.main`"
-        )
+        st.info("ℹ️ Running in Standalone In-Process Mode (Streamlit Cloud). Direct agent execution enabled.")
 
     st.subheader("📝 Research Query")
     query = st.text_area(
@@ -422,7 +524,9 @@ def main() -> None:
             return
 
         if not backend_healthy:
-            st.error("❌ Backend is not available. Please start the API server first.")
+            report_data = run_in_process_research(query.strip(), settings)
+            if report_data is not None:
+                render_report(report_data)
             return
 
         task_id = submit_research(query.strip(), settings)
